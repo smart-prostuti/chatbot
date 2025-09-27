@@ -12,7 +12,7 @@ app.use(express.json());
 // ---------------- CORS ----------------
 const ALLOWED_ORIGINS = [
   'http://localhost:5173',
-  'https://smartprostuti.netlify.app',
+  'https://smartprostuti.netlify.app/',
   'https://smartprostuti.com',
 ];
 app.use(cors({
@@ -151,3 +151,4 @@ app.get('/', (_req, res) => res.json({ ok: true }));
 app.listen(PORT, () => {
   console.log(`Server running on ${PORT}`);
 });
+
