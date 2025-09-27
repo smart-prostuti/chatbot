@@ -9,17 +9,21 @@ const PORT = process.env.PORT || 3001;
 
 app.use(express.json());
 
-// CORS (প্রয়োজনে ডোমেইন বাড়াতে পারেন)
-const ALLOWED_ORIGINS = ['http://localhost:5173','https://smartprostuti.netlify.app','https://smartprostuti.com'];
+// ---------------- CORS ----------------
+const ALLOWED_ORIGINS = [
+  'http://localhost:5173',
+  'https://smartprostuti.netlify.app',
+  'https://smartprostuti.com',
+];
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin) return cb(null, true);
+    if (!origin) return cb(null, true); // curl/Postman/no-origin
     if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
     return cb(new Error('CORS blocked'));
   },
 }));
 
-// Gemini init
+// -------------- Gemini init --------------
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 if (!GEMINI_API_KEY) {
   console.error('GEMINI_API_KEY missing');
@@ -29,7 +33,7 @@ const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 // ---------- Config & helpers ----------
 
-// Strong system prompt (Bangla, structured, factual) — but NO ambiguity preface
+// System prompt: Bangla, structured, factual
 const SYSTEM_PROMPT = `
 তুমি একজন সহায়ক সহকারী। সবসময় স্পষ্ট, প্রাকৃতিক বাংলায় উত্তর দেবে।
 নীতিমালা:
@@ -71,7 +75,7 @@ const IDENTITY_REGEX = new RegExp(
   'i'
 );
 
-// Build final prompt
+// Build final prompt (no ambiguity preface)
 function buildFinalPrompt(userText) {
   return `${SYSTEM_PROMPT}
 
@@ -81,8 +85,9 @@ ${userText}
 অনুস্মারক: সব উত্তর বাংলায় ও সংক্ষিপ্ত-সুস্পষ্টভাবে দেবে।`;
 }
 
-// ---------- Route ----------
+// ---------- Routes ----------
 
+// Core: { text } -> { answer }
 app.post('/api/ask', async (req, res) => {
   try {
     const { text } = req.body || {};
@@ -96,7 +101,7 @@ app.post('/api/ask', async (req, res) => {
     if (IDENTITY_REGEX.test(raw)) {
       const answer =
 `**সারাংশ:** আমি একটি সহায়ক সহকারী।
-**বিস্তারিত:** BOLDA আমায় Smart Prosthuti’র Tech Lead বানিয়েছেন। আপনার প্রযুক্তিগত ও ব্যবহারিক সহায়তায় পাশে আছি।`;
+**বিস্তারিত:** আমাকে বানিয়েছে smartprostuti। BOLDA আমায় Smart Prosthuti’র Tech Lead বানিয়েছেন। আপনার প্রযুক্তিগত ও ব্যবহারিক সহায়তায় পাশে আছি।`;
       return res.json({ answer });
     }
 
