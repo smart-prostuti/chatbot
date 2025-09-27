@@ -14,7 +14,7 @@ const port = process.env.PORT || 3001; // লোকাল ডেভেলপম�
 app.use(cors({
   origin: [
     'http://localhost:5173', // লোকাল ডেভেলপমেন্টের জন্য
-    'https://toolsgovt.netlify.app', // <-- আপনার Netlify ফ্রন্টএন্ড URL
+    'https://smartprostuti.netlify.app/', // <-- আপনার Netlify ফ্রন্টএন্ড URL
   ]
 }));
 app.use(express.json());
@@ -100,4 +100,5 @@ app.post('/api/generate-application', async (req, res) => {
 // লোকাল ডেভেলপমেন্টের জন্য সার্ভার চালু করে
 app.listen(port, () => {
   console.log(`Server listening on port ${port}`);
+
 });
