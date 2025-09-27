@@ -9,11 +9,11 @@ const PORT = process.env.PORT || 3001;
 
 app.use(express.json());
 
-// CORS (প্রয়োজনে তোমার ফ্রন্টএন্ড ডোমেইন যোগ করো)
+// CORS (প্রয়োজনে ডোমেইন বাড়াতে পারো)
 const ALLOWED_ORIGINS = [
   'http://localhost:5173',
   'https://smartprostuti.netlify.app',
-  'https://smartprostuti.com',
+    'https://smartprostuti.com',
 ];
 app.use(
   cors({
@@ -33,42 +33,75 @@ if (!GEMINI_API_KEY) {
 }
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
-// -------- Helpers --------
+// ----------------- Tuned Behaviors -----------------
 
-// 1) সবসময় স্পষ্ট বাংলায় উত্তর দিতে বেস প্রম্পট
-function baseBanglaPrompt(userText) {
-  return `
-নির্দেশনা: নিম্নের বার্তার উত্তর স্পষ্ট, শুদ্ধ ও প্রাকৃতিক বাংলায় দাও।
-- যেখানে প্রয়োজন, ছোট ছোট অনুচ্ছেদ বা পয়েন্ট ব্যবহার করো।
-- টেকনিক্যাল শব্দ থাকলে বাংলায় বুঝিয়ে বলো (প্রয়োজনে বন্ধনীতে ইংরেজি রূপ দাও)।
-ব্যবহারকারীর বার্তা:
-${userText}
+// A) Strong System Prompt (Bangla, structured, factual)
+const SYSTEM_PROMPT = `
+তুমি একজন সহায়ক সহকারী। সবসময় স্পষ্ট, প্রাকৃতিক বাংলায় উত্তর দেবে।
+নীতিমালা:
+- অনুমানভিত্তিক তথ্য এড়িয়ে চলো; নিশ্চিত না হলে "আমি নিশ্চিত নই" বলবে এবং কীভাবে নিশ্চিত হওয়া যায়—সেটা বলবে।
+- প্রশ্ন অস্পষ্ট হলে প্রথমে ২–৩টি স্পষ্টকরণ প্রশ্ন করবে। তারপর যুক্তিযুক্ত অনুমান ধরে "সম্ভাব্য উত্তর (ধরা-ধরি)" দেবে।
+- উত্তর কাঠামো: 
+  1) সারাংশ (এক-দুই লাইনে),
+  2) বিস্তারিত ব্যাখ্যা/ধাপ,
+  3) উদাহরণ (যদি প্রযোজ্য),
+  4) টিপস/সতর্কতা বা সীমাবদ্ধতা (যদি প্রযোজ্য)।
+- তুলনা/লিস্ট দরকার হলে বুলেট/টেবিল ব্যবহার করো।
+- সংখ্যা/তারিখ/ইউনিট—চাওয়া হলে নির্দিষ্টভাবে দাও।
+- অতিরঞ্জন/অশালীন ভাষা পরিহার করো।
 `;
-}
 
-// 2) স্ল্যাং ডিটেকশন (সহজ হিউরিস্টিক)
+// B) Slang detector (simple heuristic)
 const SLANG_PATTERNS = [
-  'vai', 'bhai', 'bro', 'boss', 'mama', 'dosto', 'dost',
-  'lol', 'lmao', 'xD', 'xd', '😂', '😹', '🤣', '😅',
-  'faltu', 'fokinni', 'ghapla', 'vela', 'kharap vibe'
+  'vai','bhai','bro','boss','mama','dosto','dost',
+  'lol','lmao','xD','xd','🤣','😂','😹','😅',
+  'faltu','fokinni','ghapla','vela','kharap vibe'
 ];
 function hasSlang(text) {
   const t = (text || '').toLowerCase();
   return SLANG_PATTERNS.some(w => t.includes(w));
 }
 
-// 3) পরিচয়/উৎস-সংক্রান্ত প্রশ্ন ডিটেকশন
+// C) Identity/attribution detector
 const IDENTITY_REGEX = new RegExp(
   [
-    'tumi ke', 'apni ke', 'ke tumi', 'who are you', 'who r u',
-    'ke ban(iy|e|a)ch', 'ke toiri', 'who made you', 'owner ke',
-    'tomake ke', 'তুমি কে', 'আপনি কে', 'কে তুমি', 'কে বানিয়েছে', 'কে बनিয়েছে', 'কে তৈরি করেছে',
-    'কে বানাইছে', 'কে বানাইছে', 'তোমাকে কে', 'কে বানিয়েছে', 'কে তৈরী করেছে', 'তোমাকে কে বানিয়েছে'
+    'tumi ke','apni ke','ke tumi','who are you','who r u',
+    'who made you','owner ke',
+    'ke ban(iy|e|a)ch','ke toiri',
+    'তুমি কে','আপনি কে','কে তুমি','কে বানিয়েছে','কে বানিয়েছে','কে তৈরি করেছে','তোমাকে কে'
   ].join('|'),
   'i'
 );
 
-// -------- Route --------
+// D) Ambiguity detector (short or generic questions)
+function isAmbiguous(q) {
+  const clean = (q || '').replace(/\s+/g, ' ').trim();
+  const wordCount = clean.split(' ').filter(Boolean).length;
+  const genericTriggers = ['কিভাবে করব','কী করব','কি করব','help','সাহায্য','how to','what to do'];
+  const hasGeneric = genericTriggers.some(t => clean.toLowerCase().includes(t));
+  return wordCount < 6 || hasGeneric;
+}
+
+// E) Build final prompt per user text
+function buildFinalPrompt(userText) {
+  return `${SYSTEM_PROMPT}
+
+ব্যবহারকারীর বার্তা:
+${userText}
+
+অনুস্মারক: সব উত্তর উপরের কাঠামো ও বাংলায় দেবে।`;
+}
+
+// F) Gemini generation config — more deterministic, long answers allowed
+const generationConfig = {
+  temperature: 0.2,
+  topP: 0.9,
+  topK: 40,
+  maxOutputTokens: 2048,
+  candidateCount: 1,
+};
+
+// ----------------- Route -----------------
 
 // ইনপুট: { text } → আউটপুট: { answer }
 app.post('/api/ask', async (req, res) => {
@@ -80,33 +113,57 @@ app.post('/api/ask', async (req, res) => {
 
     const raw = text.trim();
 
-    // (A) পরিচয়/উৎস: সরাসরি কাস্টম উত্তর
+    // 1) Identity/attribution → fixed reply (chatgpt-like persona answer)
     if (IDENTITY_REGEX.test(raw)) {
       const answer =
-        "আমার পরিচয়: আমি আপনার সহায়ক সহকারী।\n" +
-        "BOLDA আমায় Smart Prosthuti’র Tech Lead বানিয়েছেন।\n" +
-        "আপনার যে কোনো প্রযুক্তিগত সহায়তায় আমি পাশে আছি।";
+`**সারাংশ:** আমি একটি সহায়ক সহকারী।
+**বিস্তারিত:** আমায় Smart Prosthuti’র Tech Lead বানিয়েছেন। আপনাকে প্রযুক্তিগত ও ব্যবহারিক সহায়তা দেওয়াই আমার লক্ষ্য।
+**টিপস:** আপনি কী বিষয়ে সাহায্য চান—একটু নির্দিষ্ট করে বললে দ্রুত ও সঠিকভাবে সাহায্য করতে পারব।`;
       return res.json({ answer });
     }
 
-    // (B) সাধারণ প্রশ্ন: বাংলায় উত্তর দিবে
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-    const prompt = baseBanglaPrompt(raw);
-    const result = await model.generateContent(prompt);
-    const modelAnswer = result?.response?.text?.() || 'দুঃখিত, আমি কোনো উত্তর পাইনি।';
+    // 2) Prepare model
+    // Prefer systemInstruction if SDK supports; fallback via content prompt.
+    let model = genAI.getGenerativeModel({
+      model: 'gemini-2.0-flash',
+      // systemInstruction is supported in newer SDKs; harmless if ignored.
+      systemInstruction: SYSTEM_PROMPT,
+    });
 
-    // (C) স্ল্যাং থাকলে—উত্তরের আগে উপদেশ যোগ
-    if (hasSlang(raw)) {
-      const advice =
-        "💡 ছোট্ট পরামর্শ:\n" +
-        "• অনুগ্রহ করে স্ল্যাং/অপভাষা এড়িয়ে চলুন—বিশেষ করে অফিসিয়াল বা পেশাদার কথোপকথনে।\n" +
-        "• ভদ্র সম্বোধন ব্যবহার করুন, যেমন: “আপনি”, “দয়া করে”, “ধন্যবাদ”।\n" +
-        "• এতে আপনার বার্তা আরও স্পষ্ট ও গ্রহণযোগ্য হয়।\n\n" +
-        "এখন আপনার প্রশ্নের উত্তর:";
-      return res.json({ answer: `${advice}\n\n${modelAnswer}` });
+    // 3) Build prompt and call model
+    const prompt = buildFinalPrompt(raw);
+
+    let result = await model.generateContent({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig });
+    let modelAnswer = result?.response?.text?.() || '';
+
+    // 4) Retry once if empty (rare network/model blip)
+    if (!modelAnswer || modelAnswer.trim().length === 0) {
+      model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+      result = await model.generateContent({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig });
+      modelAnswer = result?.response?.text?.() || 'দুঃখিত, আমি কোনো উত্তর পাইনি।';
     }
 
-    // (D) ডিফল্ট—মডেলের বাংলা উত্তর ফেরত
+    // 5) If ambiguous → prepend clarification questions + tentative answer header
+    if (isAmbiguous(raw)) {
+      const clar = 
+`🔎 **আপনার প্রশ্নটি একটু অস্পষ্ট লাগছে। অনুগ্রহ করে নিশ্চিত করবেন:**
+1) আপনি ঠিক কোন কাজ/বিষয়টি করতে চান?
+2) কোন প্ল্যাটফর্ম/ডিভাইসে (ওয়েব/মোবাইল/উইন্ডোজ/লিনাক্স)?
+3) কোনো নির্দিষ্ট সীমাবদ্ধতা/ডেটা/ফর্ম্যাট আছে কি?
+
+**সম্ভাব্য উত্তর (ধরা-ধরি):**`;
+      modelAnswer = `${clar}\n\n${modelAnswer}`;
+    }
+
+    // 6) Slang advice → prepend guidance
+    if (hasSlang(raw)) {
+      const advice =
+`💡 **ভাষা নিয়ে ছোট্ট পরামর্শ**
+- অনুগ্রহ করে স্ল্যাং/অপভাষা পরিহার করুন—বিশেষত অফিসিয়াল/পেশাদার প্রসঙ্গে।
+- ভদ্র ও নির্দিষ্ট বাক্য ব্যবহার করলে উত্তর আরও নির্ভুল ও দ্রুত পাওয়া যায়।`;
+      modelAnswer = `${advice}\n\n${modelAnswer}`;
+    }
+
     return res.json({ answer: modelAnswer });
 
   } catch (err) {
@@ -115,7 +172,7 @@ app.post('/api/ask', async (req, res) => {
   }
 });
 
-// Health (optional)
+// Health
 app.get('/', (_req, res) => res.json({ ok: true }));
 
 app.listen(PORT, () => {
